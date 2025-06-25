@@ -1,57 +1,53 @@
+#Requires AutoHotkey v2
 #SingleInstance Force
 
 iniFile := "config.ini"
-sectionHotkey := "Hotkey"
-sectionWindows := "Windows"
-keyName := "Key"
-defaultHotkey := "F2"
+hotkeyConfigs := []
 
-hotkeyString := IniRead(iniFile, sectionHotkey, keyName, defaultHotkey)
-
-windowTitles := []
-index := 1
-loop {
-    key := "Title" index
-    title := IniRead(iniFile, sectionWindows, key, "")
-    if (title = "")
-        break
-    windowTitles.Push(title)
-    index++
-}
-
-HotIf()
-try {
-    Hotkey(hotkeyString, (*) => RunImageClickIfWindow(hotkeyString))
-} catch as e {
-    MsgBox("Invalid hotkey in config.ini: " hotkeyString "`nError: " e.Message)
-    ExitApp
-}
-
-RunImageClickIfWindow(hotkeyString) {
-    global windowTitles
-    activeTitle := WinGetTitle("A")
-    for titleFilter in windowTitles {
-        if InStr(activeTitle, titleFilter) {
-            try {
-                Run("ImageClick.exe")
-                return
-            } catch as e {
-                MsgBox("Error: " e.Message)
-                ExitApp
-            }
+; Find all sections starting with "Hotkey"
+allSections := IniRead(iniFile)
+for section in StrSplit(allSections, "`n") {
+    if InStr(section, "Hotkey") = 1 {
+        key    := IniRead(iniFile, section, "Key", "")
+        folder := IniRead(iniFile, section, "Folder", "")
+        window := IniRead(iniFile, section, "window", "")
+        if key && folder && window {
+            hotkeyConfigs.Push({key: key, folder: folder, window: window})
         }
     }
-    ; --- Not whitelisted, pass through hotkey ---
-    Hotkey(hotkeyString, "Off")
+}
+
+; Register hotkeys
+for i, cfg in hotkeyConfigs {
+    Hotkey(cfg.key, MakeHotkeyHandler(cfg))
+}
+
+MakeHotkeyHandler(cfg) {
+    return (*) => HandleHotkey(cfg)
+}
+
+HandleHotkey(cfg, *) {
+    activeTitle := WinGetTitle("A")
+    if InStr(activeTitle, cfg.window) {
+        unique := A_Now
+        file := FileOpen("trigger.txt", "w")
+        file.Write(cfg.folder "`n" unique)
+        file.Close()
+        return
+    }
+    ; Otherwise, pass hotkey through
+    Hotkey(cfg.key, "Off")
     try {
-        SendHotkeyString(hotkeyString)
+        SendHotkeyString(cfg.key)
     } finally {
-        Hotkey(hotkeyString, (*) => RunImageClickIfWindow(hotkeyString))
+        Hotkey(cfg.key, (*) => HandleHotkey(cfg))
     }
 }
 
+
+
 SendHotkeyString(hk) {
-    ; For F1–F24, send as {F5}
+    ; Function key handling, covers F1-F24 and modifiers
     if RegExMatch(hk, "^([~\^\!\+\#]*)(F\d{1,2})$", &m) {
         mods := m[1]
         key := m[2]
